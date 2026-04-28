@@ -31,15 +31,15 @@ Repurposing an Acer Chromebook 15 (CB5-571, board: YUNA, Intel Celeron, x86_64) 
 ### 3. Pi-hole v6
 - Installed Pi-hole for network-wide ad and tracker blocking
 - Configured the GL.iNet router DNS in **Manual DNS mode**:
-  - Primary: `192.168.8.156` (Pi-hole)
+  - Primary: `<server-ip>` (Pi-hole)
   - Secondary: `1.1.1.1` (Cloudflare fallback)
-- Router set to override DNS for all clients via DHCP
+- Router set to push DNS to all clients via DHCP
 
 ### 4. Samba NAS
 - Installed Samba for Windows file sharing
 - Formatted 1TB USB HDD to ext4, mounted at `/mnt/external`
 - Configured fstab with UUID for reliable auto-mount on boot
-- NAS share accessible at `\\192.168.8.156\NAS`
+- NAS share accessible at `\\<server-ip>\NAS`
 - Mapped as Z: drive on Windows PC
 
 ### 5. Network Hardening
@@ -89,12 +89,12 @@ sudo systemctl restart pihole-FTL
 ```bash
 nmcli connection show
 ```
-Identified the WiFi connection named `ATFSux` as user-scoped.
+Identified the WiFi connection as user-scoped.
 
 **Fix:**
 ```bash
-sudo nmcli connection modify ATFSux connection.permissions ""
-sudo nmcli connection up ATFSux
+sudo nmcli connection modify <wifi-ssid> connection.permissions ""
+sudo nmcli connection up <wifi-ssid>
 ```
 
 Removing the permissions field promotes it to a system connection that reconnects at boot without requiring a user session.
@@ -156,7 +156,7 @@ Samba now waits for the external drive to be mounted before starting. If the dri
 **Fix — Clear stale mapping and remap:**
 ```powershell
 net use Z: /delete
-net use Z: \\192.168.8.156\NAS /user:user /persistent:yes
+net use Z: \\<server-ip>\NAS /user:<username> /persistent:yes
 ```
 
 **Remaining mitigations (to implement):**
@@ -168,23 +168,13 @@ net use Z: \\192.168.8.156\NAS /user:user /persistent:yes
 
 ## Current Server State
 
-| Service     | Status  | Notes                              |
-|-------------|---------|-------------------------------------|
-| SSH         | Running | Headless, accessible at boot        |
-| pihole-FTL  | Running | DNS filtering, ~52MB RAM            |
-| smbd        | Running | NAS share, ~10MB RAM                |
-| GUI (XFCE)  | Disabled| multi-user.target, console only     |
-| Suspend     | Masked  | All sleep targets disabled          |
-
----
-
-## Network Layout
-
-| Device          | IP              |
-|-----------------|-----------------|
-| Router          | 192.168.8.1     |
-| Chromebook/Server | 192.168.8.156 |
-| Main PC         | 192.168.8.141   |
+| Service     | Status   | Notes                           |
+|-------------|----------|---------------------------------|
+| SSH         | Running  | Headless, accessible at boot    |
+| pihole-FTL  | Running  | DNS filtering, ~52MB RAM        |
+| smbd        | Running  | NAS share, ~10MB RAM            |
+| GUI (XFCE)  | Disabled | multi-user.target, console only |
+| Suspend     | Masked   | All sleep targets disabled      |
 
 ---
 
