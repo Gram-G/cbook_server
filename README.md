@@ -111,7 +111,18 @@ Removing the permissions field promotes it to a system connection that reconnect
 sudo systemctl mask sleep.target suspend.target hibernate.target hybrid-sleep.target
 ```
 
-**Root cause 2 — Samba memory leak:** During one session, `smbd` consumed 2.9GB of RAM on a 3.7GB system, exhausting available memory and causing a freeze. This was a one-time leak during an unusually long session; normal Samba usage runs at ~10-30MB.
+**Root cause 2 — Samba memory leak:** During two sessions, `smbd` consumed over 2.9GB of RAM on a 3.7GB system, exhausting available memory and causing a freeze. Added a memory cap and auto-restart via systemd override:
+
+```bash
+sudo systemctl edit smbd
+```
+
+```ini
+[Service]
+MemoryMax=512M
+Restart=on-failure
+RestartSec=10s
+```
 
 **Root cause 3 — Unnecessary GUI overhead:** LightDM and Xorg were running constantly at the login screen consuming ~200MB with no benefit on a headless server.
 
@@ -153,16 +164,60 @@ Samba now waits for the external drive to be mounted before starting. If the dri
 ### Problem: Z: drive dropping and failing to reconnect
 **Symptom:** Z: drive disconnects and throws "local device name is already in use" on reconnect attempt.
 
-**Fix — Clear stale mapping and remap:**
-```powershell
-net use Z: /delete
-net use Z: \\<server-ip>\NAS /user:<username> /persistent:yes
+**Root cause 1 — Bloated smb.conf:** The default Debian smb.conf included unused shares (`[homes]`, `[printers]`, `[print$]`) and contradictory guest settings. Replaced with a minimal clean config.
+
+**Root cause 2 — No keepalive settings:** Samba had no TCP keepalive configured, allowing idle connections to silently drop.
+
+**Root cause 3 — Windows SMB autodisconnect:** Windows drops idle SMB connections after 15 minutes by default.
+
+**Fix 1 — Clean smb.conf with keepalive:**
+
+Replaced `/etc/samba/smb.conf` with a minimal config:
+
+```ini
+[global]
+   workgroup = WORKGROUP
+   server role = standalone server
+   log file = /var/log/samba/log.%m
+   max log size = 1000
+   logging = file
+   map to guest = never
+   ntlm auth = yes
+   unix extensions = no
+
+   socket options = TCP_NODELAY IPTOS_LOWDELAY SO_KEEPALIVE
+   keepalive = 60
+   deadtime = 0
+
+[NAS]
+   path = /mnt/external
+   browseable = yes
+   read only = no
+   writable = yes
+   guest ok = no
+   valid users = user
+   force user = user
+   force group = user
+   create mask = 0664
+   directory mask = 0775
 ```
 
-**Remaining mitigations (to implement):**
-- Add `SO_KEEPALIVE` and `deadtime = 0` to `/etc/samba/smb.conf`
-- Disable Windows SMB autodisconnect: `net config server /autodisconnect:-1`
-- Add credentials to Windows Credential Manager for silent authentication
+**Fix 2 — Disable Windows SMB autodisconnect:**
+
+Run in elevated PowerShell on the Windows client:
+```powershell
+net config server /autodisconnect:-1
+```
+
+**Fix 3 — Windows Credential Manager:**
+
+Added Samba credentials to Windows Credential Manager for silent authentication on reconnect:
+```
+Control Panel → Credential Manager → Windows Credentials → Add a Windows credential
+  Network address: <server-ip>
+  Username: <username>
+  Password: <samba password>
+```
 
 ---
 
@@ -184,3 +239,5 @@ net use Z: \\<server-ip>\NAS /user:<username> /persistent:yes
 - On low-RAM machines, a GUI running at idle is not free. Disabling it on a headless server is always worth doing.
 - DNS Proxy mode with a single upstream and no fallback is a single point of failure for the entire network. Always configure a secondary.
 - Samba starts fast — faster than USB HDD mounts. Without an explicit dependency, it will serve whatever is at the mount point at startup, which may not be what you expect.
+- Default Samba configs include a lot of unused shares and contradictory settings. Always audit and strip smb.conf down to only what you need.
+- Always set a memory cap on services running on low-RAM machines. A runaway process will take down everything else with it.
